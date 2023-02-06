@@ -116,7 +116,7 @@ foreach ($school in $Schools)
                                 Write-Output $message # write to console
                                 $message | Out-File -FilePath .\dcidLog.txt -Append # write to log file
                                 # Read-Host "Press ENTER to CONFIRM..." # pauses before the actual change is made
-                                # Set-ADUser $adUser -Add @{pSuDCID=$uDCID} # adds the custom attribute PSuDCID to the user
+                                Set-ADUser $adUser -Add @{pSuDCID=$uDCID} # adds the custom attribute PSuDCID to the user
                             }
                             else 
                             {
@@ -140,7 +140,7 @@ foreach ($school in $Schools)
                     }
                 }
             }
-            else 
+            else # otherwise if we found a match for the DCID
             {
                 $samAccountName = $adUser.SamAccountName
                 $message = "    SUCCESS: User $uDCID already found under $samAccountName"
@@ -148,7 +148,7 @@ foreach ($school in $Schools)
                 $message | Out-File -FilePath .\dcidLog.txt -Append 
             }
         }
-        else # otherwise if we found a match for the DCID
+        else # otherwise if their name was found in the bad names list, just give a warning
         {
             $message = "INFO: found user matching name in bad names list: $firstName $LastName"
             Write-Output $message
