@@ -160,12 +160,12 @@ foreach ($school in $Schools)
                         Set-ADUser $adUser -GivenName $firstName -Surname $lastName
                         if ($currentSamAccountName -ne $samAccountName)
                         {
-                            $message = "      ACTION: SAMNAME: User $uDCID changed names, updating account name from $currentSamAccountName to $samAccountName and 'full name' from $currentFullName to $samAccountName"
+                            $message = "      ACTION: SAMNAME: User $uDCID changed names, updating account name from $currentSamAccountName to $samAccountName"
                             Write-Output $message # write to console
                             $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
                             try # try to set the unique name, but catch if it fails and try some other permutations
                             {
-                                Set-ADUser $adUser -SamAccountName $samAccountName -Name $samAccountName # update the actual samAccountName and the object name
+                                Set-ADUser $adUser -SamAccountName $samAccountName # update the actual samAccountName
                                 $currentSamAccountName = $samAccountName
                             }
                             catch
@@ -179,7 +179,7 @@ foreach ($school in $Schools)
                                 $samAccountName = $lastName.ToLower().replace(" ", "-").replace("'", "") + "." + $firstName.ToLower().replace(" ", "-").replace("'", "")
                                 try # try to set the name again
                                 {
-                                    Set-ADUser $adUser -SamAccountName $samAccountName -Name $samAccountName # update the actual samAccountName and the object name
+                                    Set-ADUser $adUser -SamAccountName $samAccountName # update the actual samAccountName
                                     $currentSamAccountName = $samAccountName
                                 }
                                 catch 
@@ -210,7 +210,7 @@ foreach ($school in $Schools)
                         $message = "      ACTION: EMAIL: User $firstName $lastName - $uDCID - has had their email change from $oldEmail to $email, changing"
                         Write-Output $message # write to console
                         $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
-                        # Set-ADUser $adUser -EmailAddress $email -UserPrincipalName $email # update the user's email and principal name which is also their email
+                        Set-ADUser $adUser -EmailAddress $email -UserPrincipalName $email # update the user's email and principal name which is also their email
                     }
                     
                     # Check to see if they are in the right OU, move them if not
