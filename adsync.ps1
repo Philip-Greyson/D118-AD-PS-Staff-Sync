@@ -20,9 +20,13 @@ Add-Type -Path $OracleDLLPath
 Import-Module SqlServer
 Import-Module ActiveDirectory
 
+$localLog = ".\staffSyncLog.txt"
+# $remoteLog = "L:\staffSyncLog.txt"
+
 # Clear out log file from previous run
-Clear-Content -Path .\syncLog.txt
-# repadmin.exe /showrepl *
+Clear-Content -Path $localLog
+# Clear-Content -Path $remoteLog
+repadmin.exe /showrepl *
 repadmin.exe /syncall D118-DIST-OFF /Aed # synchronize the controllers so they all have updated data
 # break
 
@@ -32,7 +36,7 @@ $connectionstring = 'User Id=' + $username + ';Password=' + $password + ';Data S
 $con = New-Object Oracle.ManagedDataAccess.Client.OracleConnection($connectionstring)
 
 # make a query to find a list of schools
-$querySchools = "SELECT name, school_number, abbreviation FROM schools" 
+$querySchools = "SELECT name, school_number, abbreviation FROM schools WHERE school_number <> 136 " # query to find all schools in our district except the "extra" one used for utility accounts, etc
 
 #Create a command and configure it
 $cmd = $con.CreateCommand()
@@ -52,7 +56,7 @@ $constantOU = $Env:CONSTANT_OU_ENDING # define the constant parts of our AD OU s
 $defaultPassword = ConvertTo-SecureString $Env:AD_NEW_USER_PASSWORD -AsPlainText -Force  # define the default password used for new accounts
 
 $staffJobTypes = "Not Assigned","Teacher","Staff","Lunch Staff","Substitute"
-$badNames = 'Use', 'Training1','Trianing2','Trianing3','Trianing4','Planning','Admin','Nurse','User', 'Use ', 'Test', 'Testtt', 'Do Not', 'Do', 'Not', 'Tbd', 'Lunch', 'Formbuilder', 'Human' # define list of names to ignore
+$badNames = 'Use', 'Training1','Trianing2','Trianing3','Trianing4','Planning','Admin','Nurse','User', 'Use ', 'Test', 'Testtt', 'Do Not', 'Do', 'Not', 'Tbd', 'Lunch', 'Formbuilder', 'Human', 'Substitute' # define list of names to ignore
 
 # define our district wide employee AD groups
 $districtTeacherGroup = "D118 Teachers"
@@ -75,11 +79,11 @@ foreach ($school in $Schools)
 
     # print out a space line and the school info header to console and log file
     Write-Output $spacer
-    Write-Output $spacer | Out-File -FilePath .\syncLog.txt -Append
+    Write-Output $spacer | Out-File -FilePath $localLog  -Append
     Write-Output $schoolInfo 
-    Write-Output $schoolInfo | Out-File -FilePath .\syncLog.txt -Append
+    Write-Output $schoolInfo | Out-File -FilePath $localLog  -Append
     Write-Output $spacer
-    Write-Output $spacer | Out-File -FilePath .\syncLog.txt -Append
+    Write-Output $spacer | Out-File -FilePath $localLog  -Append
 
     # get the members of the teachers and staff groups at the current building, for reference in each user without querying every time. Ignoring buildings where these groups do not exist
     if (($schoolAbbrev -ne "O-HR") -and ($schoolAbbrev -ne "SUM") -and ($schoolAbbrev -notlike "DNU *") -and ($schoolAbbrev -ne "Graduated Students") -and ($schoolAbbrev -ne "AUX"))
@@ -89,14 +93,14 @@ foreach ($school in $Schools)
         $schoolTeacherMembers = Get-ADGroupMember -Identity $schoolTeacherGroup -Recursive | Select-Object -ExpandProperty samAccountName
         $schoolStaffMembers = Get-ADGroupMember -Identity $schoolStaffGroup -Recursive | Select-Object -ExpandProperty samAccountName
         # debug group memberships
-        # Write-Output $schoolInfo | Out-File -FilePath .\syncLog.txt -Append
-        # "Teachers:" | Out-File -FilePath .\syncLog.txt -Append
-        # Write-Output $schoolInfo | Out-File -FilePath .\syncLog.txt -Append
-        # $schoolTeacherMembers | Out-File -FilePath .\syncLog.txt -Append # output to the syncLog.txt file
-        # Write-Output $schoolInfo | Out-File -FilePath .\syncLog.txt -Append
-        # "Staff:" | Out-File -FilePath .\syncLog.txt -Append
-        # Write-Output $schoolInfo | Out-File -FilePath .\syncLog.txt -Append
-        # $schoolStaffMembers | Out-File -FilePath .\syncLog.txt -Append # output to the syncLog.txt file
+        # Write-Output $schoolInfo | Out-File -FilePath $localLog  -Append
+        # "Teachers:" | Out-File -FilePath $localLog  -Append
+        # Write-Output $schoolInfo | Out-File -FilePath $localLog  -Append
+        # $schoolTeacherMembers | Out-File -FilePath $localLog  -Append # output to the staffSyncLog file
+        # Write-Output $schoolInfo | Out-File -FilePath $localLog -Append
+        # "Staff:" | Out-File -FilePath $localLog  -Append
+        # Write-Output $schoolInfo | Out-File -FilePath $localLog -Append
+        # $schoolStaffMembers | Out-File -FilePath $localLog  -Append # output to the staffSyncLog file
     }
     # create a new query to find the users in the current building
     $userQuery = "SELECT users.last_name, users.first_name, users.email_addr, users.teachernumber, schoolstaff.status, schoolstaff.staffstatus, users.dcid, users.preferredname, u_humanresources.jobtitle `
@@ -135,9 +139,10 @@ foreach ($school in $Schools)
             $firstInitial = $firstName.Substring(0,1) # get the first initial by getting the first character of the first name
             $samAccountName = $lastName.ToLower().replace(" ", "-").replace("'", "") + $firstInitial.ToLower()
             $jobType = $staffJobTypes[$staffType]
-            $userInfo = "INFO: Processing User: First: $firstName | Last: $lastName | Email: $email | Active: $active | Type: $jobType | Teacher ID: $teachNumber | DCID: $uDCID"
+            $userInfo = "DBUG: Processing User: First: $firstName | Last: $lastName | Email: $email | Active: $active | Type: $jobType | Teacher ID: $teachNumber | DCID: $uDCID"
             Write-Output $userInfo
-            $userInfo | Out-File -FilePath .\syncLog.txt -Append # output to the syncLog.txt file
+            $userInfo | Out-File -FilePath $localLog -Append
+            # $userInfo | Out-File -FilePath $remoteLog -Append # output to the remote log file
             if ($active -eq 1)
             { # if they have a 1 they are active, anything else is inactive
                 $adUser = Get-ADUser -Filter "pSuDCID -eq $uDCID" -Properties mail,title,department,description,homedirectory # do a query for existing users with the custom attribute pSuDCID that equals the users DCID
@@ -145,24 +150,27 @@ foreach ($school in $Schools)
                 { # if we find a user with a matchind DCID, just update their info
                     $currentSamAccountName = $adUser.SamAccountName
                     $currentFullName = $adUser.name
-                    $message = "  User with DCID $uDCID already exists under samname $currentSamAccountName, object full name $currentFullName. Updating any info"
+                    $message = "DBUG: User with DCID $uDCID already exists under samname $currentSamAccountName, object full name $currentFullName. Updating any info"
                     Write-Output $message # write to console
-                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                    $message | Out-File -FilePath $localLog -Append
+                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
 
                     # Check to see if their name has changed, update the name fields and the sam account name
                     if (($firstName -ne $adUser.GivenName) -or ($lastName -ne $adUser.Surname) )
                     {
                         $currentFirst = $adUser.GivenName
                         $currentLast = $adUser.Surname
-                        $message = "      ACTION: NAME: User $uDCID changed names, updating from $currentFirst $currentLast to $firstName $lastName"
+                        $message = "ACTION - NAME: User $uDCID changed names, updating from $currentFirst $currentLast to $firstName $lastName"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         Set-ADUser $adUser -GivenName $firstName -Surname $lastName
                         if ($currentSamAccountName -ne $samAccountName)
                         {
-                            $message = "      ACTION: SAMNAME: User $uDCID changed names, updating account name from $currentSamAccountName to $samAccountName"
+                            $message = "ACTION - SAMNAME: User $uDCID changed names, updating account name from $currentSamAccountName to $samAccountName"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             try # try to set the unique name, but catch if it fails and try some other permutations
                             {
                                 Set-ADUser $adUser -SamAccountName $samAccountName # update the actual samAccountName
@@ -170,11 +178,13 @@ foreach ($school in $Schools)
                             }
                             catch
                             {
-                                $message = "          ERROR: Could not change $currentSamAccountName to $samAccountName, trying with full first name"
+                                $message = "ERROR: Could not change user $uDCID's SamName from $currentSamAccountName to $samAccountName, trying with full first name"
                                 Write-Output $message # write to console
-                                $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                                $message | Out-File -FilePath $localLog -Append
+                                # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 Write-Output $_ # write out the actual error
-                                $_ | Out-File -FilePath .\syncLog.txt -Append
+                                $_ | Out-File -FilePath $localLog -Append
+                                # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                                 # add their full first name after a period after the last name
                                 $samAccountName = $lastName.ToLower().replace(" ", "-").replace("'", "") + "." + $firstName.ToLower().replace(" ", "-").replace("'", "")
                                 try # try to set the name again
@@ -184,11 +194,13 @@ foreach ($school in $Schools)
                                 }
                                 catch 
                                 {
-                                    $message =  "          ERROR: Could not change $currentSamAccountName to $samAccountName, out of tries, stopping"
+                                    $message =  "ERROR: Could not change user $uDCID's SamName from $currentSamAccountName to $samAccountName, out of tries, stopping"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                                     Write-Output $_ # write out the actual error
-                                    $_ | Out-File -FilePath .\syncLog.txt -Append
+                                    $_ | Out-File -FilePath $localLog -Append
+                                    # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 }
                             }
                         }
@@ -197,9 +209,10 @@ foreach ($school in $Schools)
                     # Check to make sure their user account is enabled
                     if (!$adUser.Enabled)
                     {
-                        $message = "      ACTION: ENABLE: Enabling user $currentSamAccountName - $uDCID - $email"
+                        $message = "ACTION - ENABLE: Enabling user $currentSamAccountName - $uDCID - $email"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         Enable-ADAccount $adUser # enables the selected account
                     }
 
@@ -207,9 +220,10 @@ foreach ($school in $Schools)
                     if ($email -ne $adUser.mail)
                     {
                         $oldEmail = $adUser.mail
-                        $message = "      ACTION: EMAIL: User $firstName $lastName - $uDCID - has had their email change from $oldEmail to $email, changing"
+                        $message = "ACTION - EMAIL: User $firstName $lastName - $uDCID - has had their email change from $oldEmail to $email, changing"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         Set-ADUser $adUser -EmailAddress $email -UserPrincipalName $email # update the user's email and principal name which is also their email
                     }
                     
@@ -220,18 +234,21 @@ foreach ($school in $Schools)
                         $currentDistinguished =  $adUser.DistinguishedName
                         try
                         {
-                            $message = "      ACTION: OU: User $currentSamAccountName NOT in correct OU, moving from $currentDistinguished to $properDistinguished"
+                            $message = "ACTION - OU: User $currentSamAccountName - $uDCID is NOT in correct OU, moving from $currentDistinguished to $properDistinguished"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             Move-ADObject $adUser -TargetPath $OUPath # moves the targeted AD user account to the correct OU
                         }
                         catch 
                         {
-                            $message =  "          ERROR: Could not move $currentSamAccountName to $OUPath"
+                            $message =  "ERROR: Could not move user $uDCID - $currentSamAccountName to $OUPath"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                             Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath .\syncLog.txt -Append
+                            $_ | Out-File -FilePath $localLog -Append
+                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         }
                     }
 
@@ -240,9 +257,10 @@ foreach ($school in $Schools)
                     {
                         $oldTitle = $adUser.title
                         $oldDept = $adUser.department
-                        $message = "      ACTION: TITLE-DEPARTMENT: Updating user $uDCID's title from $oldTitle to $teachNumber and department from $oldDept to $jobType"
+                        $message = "ACTION - TITLE/DEPARTMENT: Updating user $uDCID's title from $oldTitle to $teachNumber and department from $oldDept to $jobType"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         Set-ADUser $adUser -Title $teachNumber -Department $jobType
                     }
 
@@ -250,27 +268,30 @@ foreach ($school in $Schools)
                     if (($adUser.description -ne $jobTitle) -and ![string]::IsNullOrEmpty($jobTitle))
                     {
                         $oldDescription = $adUser.description
-                        $message = "      ACTION: DESCRIPTION: Updating user $uDCID's description from $oldDescription to $jobTitle"
+                        $message = "ACTION - DESCRIPTION: Updating user $uDCID's description from $oldDescription to $jobTitle"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         Set-ADUser $adUser -Description $jobTitle
                     }
 
                     # Check to ensure the user is a member of the papercut staff group
                     if ($papercutStaffMembers -notcontains $adUser.samAccountName)
                     {
-                        $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $papercutGroup, will add them"
+                        $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $papercutGroup, will add them"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         try 
                         {
                             Add-ADGroupMember -Identity $papercutGroup -Members $adUser.samAccountName # add the user to the group
                         }
                         catch
                         {
-                            $message = "     ERROR: Could not add $currentSameAccountName to $papercutGroup"
+                            $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $papercutGroup"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         }
                     }
 
@@ -282,35 +303,39 @@ foreach ($school in $Schools)
                             # check the district wide teacher group
                             if ($districtTeacherMembers -notcontains $adUser.samAccountName)
                             {
-                                $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $districtTeacherGroup, will add them"
+                                $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $districtTeacherGroup, will add them"
                                 Write-Output $message # write to console
-                                $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                $message | Out-File -FilePath $localLog -Append
+                                # $message | Out-File -FilePath $remoteLog -Append # output to the remote log filee 
                                 try 
                                 {
                                     Add-ADGroupMember -Identity $districtTeacherGroup -Members $adUser.samAccountName # add the user to the group
                                 }
                                 catch
                                 {
-                                    $message = "     ERROR: Could not add $currentSameAccountName to $districtTeacherGroup"
+                                    $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $districtTeacherGroup"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 }
                             }
                             # check the school teacher group
                             if ($schoolTeacherMembers -notcontains $adUser.samAccountName)
                             {
-                                $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $schoolTeacherGroup, will add them"
+                                $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $schoolTeacherGroup, will add them"
                                 Write-Output $message # write to console
-                                $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                $message | Out-File -FilePath $localLog -Append
+                                # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                                 try 
                                 {
                                     Add-ADGroupMember -Identity $schoolTeacherGroup -Members $adUser.samAccountName # add the user to the group
                                 }
                                 catch 
                                 {
-                                    $message = "     ERROR: Could not add $currentSameAccountName to $schoolTeacherGroup"
+                                    $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $schoolTeacherGroup"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 }
                             }
                         }
@@ -319,35 +344,39 @@ foreach ($school in $Schools)
                             # check the district wide staff group
                             if ($districtStaffMembers -notcontains $adUser.samAccountName)
                             {
-                                    $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $districtStaffGroup, will add them"
+                                    $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $districtStaffGroup, will add them"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                                     try 
                                     {
                                         Add-ADGroupMember -Identity $districtStaffGroup -Members $adUser.samAccountName # add the user to the group
                                     }
                                     catch 
                                     {
-                                        $message = "     ERROR: Could not add $currentSameAccountName to $districtStaffGroup"
+                                        $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to to $districtStaffGroup"
                                         Write-Output $message # write to console
-                                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                        $message | Out-File -FilePath $localLog -Append
+                                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                     }
                             }
                             # check the school staff group
                             if ($schoolStaffMembers -notcontains $adUser.samAccountName)
                             {
-                                $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $schoolStaffGroup, will add them"
+                                $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $schoolStaffGroup, will add them"
                                 Write-Output $message # write to console
-                                $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                $message | Out-File -FilePath $localLog -Append
+                                # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 try 
                                 {
                                     Add-ADGroupMember -Identity $schoolStaffGroup -Members $adUser.samAccountName # add the user to the group
                                 }
                                 catch 
                                 {
-                                    $message = "     ERROR: Could not add $currentSameAccountName to $schoolStaffGroup"
+                                    $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $schoolStaffGroup"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 }
                             }
                         }
@@ -356,18 +385,20 @@ foreach ($school in $Schools)
                             # check district wide sub group
                             if ($districtSubMembers -notcontains $adUser.samAccountName)
                             {
-                                $message =  "       ACTION: GROUP: User $currentSamAccountName - $email - $jobType is not a member of $districtSubGroup, will add them"
+                                $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $districtSubGroup, will add them"
                                 Write-Output $message # write to console
-                                $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                $message | Out-File -FilePath $localLog -Append
+                                # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 try 
                                 {
                                     Add-ADGroupMember -Identity $districtSubGroup -Members $adUser.samAccountName # add the user to the group
                                 }
                                 catch 
                                 {
-                                    $message = "     ERROR: Could not add $currentSameAccountName to $districtSubGroup"
+                                    $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $districtSubGroup"
                                     Write-Output $message # write to console
-                                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                                    $message | Out-File -FilePath $localLog -Append
+                                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                                 }
                             }
                         }
@@ -376,9 +407,10 @@ foreach ($school in $Schools)
                     # Check to see if the "Full Name" is the same as their samAccountName, if not, change it to match
                     if ($currentFullName -ne $currentSamAccountName)
                     {
-                        $message = "      ACTION: FULL NAME: Updating user $uDCID's 'full name' from $currentFullName to $currentSamAccountName"
+                        $message = "ACTION - FULL NAME: Updating user $uDCID's 'full name' from $currentFullName to $currentSamAccountName"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the sremote log file
                         Rename-ADObject $adUser -NewName $currentSamAccountName
                     }
 
@@ -389,28 +421,31 @@ foreach ($school in $Schools)
                         switch -Wildcard ($schoolAbbrev)
                         {
                             "??S" {$schoolHomedrive = $schoolAbbrev + "_Teachers$\"}
-                            "SSO OFF" {$schoolHomedrive = "SSO_Staff$\"}
+                            "SSO OFF" {$schoolHomedrive = "District_Office_Staff$\"}
                             "CUR OFF" {$schoolHomedrive = "Curriculum_Staff$\"}
                             "TRAN" {$schoolHomedrive = "Transportation_Staff$\"}
                             "MNT" {$schoolHomedrive = "Maintenance_Staff$\"}
-                            "CO" {$schoolHomedrive = "District_Office_Home_Drives$\"}
+                            "CO" {$schoolHomedrive = "District_Office_Staff$\"}
                             Default {$schoolHomedrive = "Other_Staff$\"}
                         }
                         $newHomedirectory = $env:SHARED_DRIVE_BASE_PATH + $schoolHomedrive + $currentSamAccountName
-                        $message = "      ACTION: HOMEDRIVE: User $currentSamAccountName - $uDCID's does not have a home directory mapped, will be assigned one at $newHomedirectory"
+                        $message = "ACTION - HOMEDRIVE: User $uDCID - $currentSamAccountName does not have a home directory mapped, will be assigned one at $newHomedirectory"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         try 
                         {
                             Set-ADUser $adUser -HomeDirectory $newHomedirectory -HomeDrive "H:" # set their home drive to be H: and mapped to the directory constructed from their building and name
                         }
                         catch 
                         {
-                            $message =  "          ERROR: Could not map homedrive for $currentSamAccountName to $newHomedirectory"
+                            $message =  "ERROR: Could not map homedrive for user $uDCID - $currentSamAccountName to $newHomedirectory"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                             Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath .\syncLog.txt -Append
+                            $_ | Out-File -FilePath $localLog -Append
+                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         }
                         
                     }
@@ -418,33 +453,38 @@ foreach ($school in $Schools)
                 # otherwise a user was not found, and we need to create them
                 else 
                 {
-                    $message =  "  ACTION: CREATION: User with DCID $uDCID does not exist, will try to create them as $samAccountName"
+                    $message =  "ACTION - CREATION: User with DCID $uDCID does not exist, will try to create them as $samAccountName"
                     Write-Output $message # write to console
-                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                    $message | Out-File -FilePath $localLog -Append
+                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                     try
                     {
-                        New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -CannotChangePassword $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
+                        New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
                     }
                     catch
                     {
-                        $message =  "       ERROR: Could not create user $samAccountName, trying again with full first name appended"
+                        $message =  "ERROR: Could not create user $samAccountName for DCID $uDCID, trying again with full first name appended"
                         Write-Output $message # write to console
-                        $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                        $message | Out-File -FilePath $localLog -Append
+                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         Write-Output $_ # write out the actual error
-                        $_ | Out-File -FilePath .\syncLog.txt -Append
+                        $_ | Out-File -FilePath $localLog -Append
+                        # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         # add their full first name after a period after the last name
                         $samAccountName = $lastName.ToLower().replace(" ", "-").replace("'", "") + "." + $firstName.ToLower().replace(" ", "-").replace("'", "")
                         try
                         {
-                            New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -CannotChangePassword $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
+                            New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
                         }
                         catch
                         {
-                            $message =  "       ERROR: Could not create user $samAccountName, stopping"
+                            $message =  "ERROR: Could not create user $samAccountName for $uDCID, stopping"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                             Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath .\syncLog.txt -Append
+                            $_ | Out-File -FilePath $localLog -Append
+                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         }
                     }
                 }
@@ -460,27 +500,31 @@ foreach ($school in $Schools)
                     $currentFullName = $adUser.name
                     $properDistinguised = "CN=$currentFullName,$OUPath"
                     $currentSamAccountName = $adUser.SamAccountName
-                    $message = "  User with DCID $uDCID already exists under $currentSamAccountName, ensuring they are suspended"
+                    $message = "DBUG: User with DCID $uDCID already exists under $currentSamAccountName, ensuring they are suspended"
                     Write-Output $message # write to console
-                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                    $message | Out-File -FilePath $localLog -Append
+                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file  
                     # check and see if their account is in the right OU
                     # check to see if the account is enabled, if so we need to disable it
                     if ($adUser.Enabled)
                     {
                         try 
                         {
-                            $message = "      ACTION: SUSPENDED DISABLE: Disabling user $currentSamAccountName - $uDCID - $email"
+                            $message = "ACTION - SUSPEND/DISABLE: Disabling user $uDCID - $currentSamAccountName - $email"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             Disable-ADAccount $adUser # disables the selected account
                         }
                         catch 
                         {
-                            $message =  "          ERROR: Could not suspend $currentSamAccountName - $uDCID - $currentSamAccountName"
+                            $message =  "ERROR: Could not suspend $uDCID - $currentSamAccountName - $currentSamAccountName"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath .\syncLog.txt -Append
+                            $_ | Out-File -FilePath $localLog -Append
+                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         }
                         
                     }
@@ -488,35 +532,40 @@ foreach ($school in $Schools)
                     {
                         try 
                         {
-                            $message = "      ACTION: SUSPENDED OU: Moving user $currentSamAccountName - $uDCID - $email to the Suspended Users Staff OU"
+                            $message = "ACTION - SUSPENDED OU: Moving user $uDCID - $currentSamAccountName - $email to the Suspended Users Staff OU"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             Move-ADObject $adUser -TargetPath $OUPath # moves the targeted AD user account to the correct suspended accounts OU
                         }
                         catch 
                         {
-                            $message =  "          ERROR: Could not move $uDCID - $currentSamAccountName to the suspended users - staff OU"
+                            $message = "ERROR: Could not move $uDCID - $currentSamAccountName to the suspended users - staff OU"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                            $message | Out-File -FilePath $localLog -Append
+                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                             Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath .\syncLog.txt -Append
+                            $_ | Out-File -FilePath $localLog -Append
+                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                         }
                         
                     }
                 }
                 else
                 {
-                    $message = "  WARNING: Found inactive user DCID $uDCID without matching AD account. Should be $samAccountName"
+                    $message = "WARN: Found inactive user DCID $uDCID without matching AD account. Should be $samAccountName, but they will not be created until the account is active in PS"
                     Write-Output $message # write to console
-                    $message | Out-File -FilePath .\syncLog.txt -Append # write to log file 
+                    $message | Out-File -FilePath $localLog -Append
+                    # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                 }
             }
         }
         else # otherwise if their name was found in the bad names list, just give a warning
         {
-            $message = "INFO: found user matching name in bad names list: $firstName $LastName"
+            $message = "DBUG: Found user matching name in bad names list: $firstName $LastName"
             Write-Output $message
-            $message | Out-File -FilePath .\syncLog.txt -Append
+            $message | Out-File -FilePath $localLog -Append
+            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
         }
     }
 }
