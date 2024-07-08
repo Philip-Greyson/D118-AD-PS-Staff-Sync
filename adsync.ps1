@@ -435,19 +435,39 @@ foreach ($school in $Schools)
                         # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file
                         try 
                         {
+                            if (!(Test-Path -Path $newHomedirectory)) # check to see if the folder we want to set as the homedrive exists, if not we need to create it
+                            {
+                                New-Item -ItemType Directory -Path $newHomedirectory -Force # make the folder in the shared drive with the user account name
+                                $ACL = Get-ACL -Path $newHomedirectory # get the current ACL rules from the folder
+                                $newAccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentSamAccountName,"FullControl","ContainerInherit,ObjectInherit","None","allow") # give full control to the specified user
+                                $ACL.SetAccessRule($newAccessRule) # override the ACL settings to our new one
+                                $ACL | Set-Acl -Path $newHomedirectory # apply the ACL to the home directory
+                            }
                             Set-ADUser $adUser -HomeDirectory $newHomedirectory -HomeDrive "H:" # set their home drive to be H: and mapped to the directory constructed from their building and name
                         }
                         catch 
                         {
-                            $message =  "ERROR: Could not map homedrive for user $uDCID - $currentSamAccountName to $newHomedirectory"
+                            $message =  "ERROR: Could not map homedrive for user $uDCID - $currentSamAccountName to $newHomedirectory, waiting and then trying again: $_"
                             Write-Output $message # write to console
-                            $message | Out-File -FilePath $localLog -Append
-                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
-                            Write-Output $_ # write out the actual error
-                            $_ | Out-File -FilePath $localLog -Append
-                            # $_ | Out-File -FilePath $remoteLog -Append # output to the remote log file 
-                        }
-                        
+                            $message | Out-File -FilePath $localLog -Append 
+                            Write-Output $_ # write out the actual error to console
+                            $_ | Out-File -FilePath $localLog -Append # write out the error to the log file
+                            
+                            # If the first mapping of the homedrive fails, wait a minute and then try again. Usually it just doesnt like the fact that the folder was just created and will work the second time
+                            try 
+                            {
+                                Start-Sleep -Seconds 60
+                                Set-ADUser $adUser -HomeDirectory $newHomedirectory -HomeDrive "H:" # set their home drive to be H: and mapped to the directory constructed from their building and name
+                            }
+                            catch 
+                            {
+                                $message =  "ERROR: Could not map homedrive on 2nd attempt for user $uDCID - $currentSamAccountName to $newHomedirectory : $_"
+                                Write-Output $message # write to console
+                                $message | Out-File -FilePath $localLog -Append
+                                Write-Output $_ # write out the actual error
+                                $_ | Out-File -FilePath $localLog -Append
+                            }
+                        }                        
                     }
                 }
                 # otherwise a user was not found, and we need to create them
@@ -459,7 +479,7 @@ foreach ($school in $Schools)
                     # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
                     try
                     {
-                        New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
+                        New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
                     }
                     catch
                     {
@@ -474,7 +494,7 @@ foreach ($school in $Schools)
                         $samAccountName = $lastName.ToLower().replace(" ", "-").replace("'", "") + "." + $firstName.ToLower().replace(" ", "-").replace("'", "")
                         try
                         {
-                            New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $False -PasswordNeverExpires $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
+                            New-ADUser -SamAccountName $samAccountName -Name $samAccountName -DisplayName ($firstName + " " + $lastName) -GivenName $firstName -Surname $lastName -EmailAddress $email -UserPrincipalName $email -Path $OUPath -AccountPassword $defaultPassword -ChangePasswordAtLogon $true -Enabled $true -Title $teachNumber -Department $jobType -Description $jobTitle -OtherAttributes @{'pSuDCID' = $uDCID}
                         }
                         catch
                         {
