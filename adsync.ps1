@@ -62,12 +62,12 @@ $badNames = 'Use', 'Training1','Trianing2','Trianing3','Trianing4','Planning','A
 $districtTeacherGroup = "D118 Teachers"
 $districtStaffGroup = "D118 Staff"
 $districtSubGroup = "D118 Substitutes"
-$papercutGroup = "Papercut Staff Group"
+# $papercutGroup = "Papercut Staff Group"
 # find the members of these district wide groups so we only have to do it once and then can reference them later
 $districtStaffMembers = Get-ADGroupMember -Identity $districtStaffGroup -Recursive | Select-Object -ExpandProperty samAccountName
 $districtTeacherMembers = Get-ADGroupMember -Identity $districtTeacherGroup -Recursive | Select-Object -ExpandProperty samAccountName
 $districtSubMembers = Get-ADGroupMember -Identity $districtSubGroup -Recursive | Select-Object -ExpandProperty samAccountName
-$papercutStaffMembers = Get-ADGroupMember -Identity $papercutGroup -Recursive | Select-Object -ExpandProperty samAccountName
+# $papercutStaffMembers = Get-ADGroupMember -Identity $papercutGroup -Recursive | Select-Object -ExpandProperty samAccountName
 
 foreach ($school in $Schools)
 {
@@ -276,24 +276,24 @@ foreach ($school in $Schools)
                     }
 
                     # Check to ensure the user is a member of the papercut staff group
-                    if ($papercutStaffMembers -notcontains $adUser.samAccountName)
-                    {
-                        $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $papercutGroup, will add them"
-                        Write-Output $message # write to console
-                        $message | Out-File -FilePath $localLog -Append
-                        # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
-                        try 
-                        {
-                            Add-ADGroupMember -Identity $papercutGroup -Members $adUser.samAccountName # add the user to the group
-                        }
-                        catch
-                        {
-                            $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $papercutGroup"
-                            Write-Output $message # write to console
-                            $message | Out-File -FilePath $localLog -Append
-                            # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
-                        }
-                    }
+                    # if ($papercutStaffMembers -notcontains $adUser.samAccountName)
+                    # {
+                    #     $message =  "ACTION - GROUP: User $uDCID - $currentSamAccountName - $email - $jobType is not a member of $papercutGroup, will add them"
+                    #     Write-Output $message # write to console
+                    #     $message | Out-File -FilePath $localLog -Append
+                    #     # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
+                    #     try 
+                    #     {
+                    #         Add-ADGroupMember -Identity $papercutGroup -Members $adUser.samAccountName # add the user to the group
+                    #     }
+                    #     catch
+                    #     {
+                    #         $message = "ERROR: Could not add user $uDCID - $currentSameAccountName to $papercutGroup"
+                    #         Write-Output $message # write to console
+                    #         $message | Out-File -FilePath $localLog -Append
+                    #         # $message | Out-File -FilePath $remoteLog -Append # output to the remote log file 
+                    #     }
+                    # }
 
                     # Check to ensure the user is a member of the d118-staff/teachers and school specific staff/teacher groups they are in, ignoring the onboarding, summer school, graduated students, and any of our do not use (DNU) buildings
                     if (($schoolAbbrev -ne "O-HR") -and ($schoolAbbrev -ne "SUM") -and ($schoolAbbrev -notlike "DNU *") -and ($schoolAbbrev -ne "Graduated Students") -and ($schoolAbbrev -ne "AUX"))
@@ -442,6 +442,7 @@ foreach ($school in $Schools)
                                 $newAccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentSamAccountName,"FullControl","ContainerInherit,ObjectInherit","None","allow") # give full control to the specified user
                                 $ACL.SetAccessRule($newAccessRule) # override the ACL settings to our new one
                                 $ACL | Set-Acl -Path $newHomedirectory # apply the ACL to the home directory
+								Start-Sleep -Seconds 300
                             }
                             Set-ADUser $adUser -HomeDirectory $newHomedirectory -HomeDrive "H:" # set their home drive to be H: and mapped to the directory constructed from their building and name
                         }
@@ -456,7 +457,7 @@ foreach ($school in $Schools)
                             # If the first mapping of the homedrive fails, wait a minute and then try again. Usually it just doesnt like the fact that the folder was just created and will work the second time
                             try 
                             {
-                                Start-Sleep -Seconds 60
+                                Start-Sleep -Seconds 300
                                 Set-ADUser $adUser -HomeDirectory $newHomedirectory -HomeDrive "H:" # set their home drive to be H: and mapped to the directory constructed from their building and name
                             }
                             catch 
